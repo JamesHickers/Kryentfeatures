@@ -1,124 +1,194 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KrySearch - Search Engine</title>
+<script>
+(async function () {
 
-<link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
-<style>
-  body { background:#36393f; font-family:sans-serif; margin:0; padding:20px; color:#fff; display:flex; flex-direction:column; align-items:center;}
-  h1 { color:#00aff4; margin-bottom:10px;}
-  input[type=file] { margin-bottom:20px; padding:8px 12px; background:#7289da; border:none; border-radius:4px; color:white; cursor:pointer;}
-  .video-feed { display:flex; flex-direction:column; gap:16px; width:100%; max-width:900px; }
-  .video-wrapper { position:relative; border-radius:8px; overflow:hidden; background:#2f3136; box-shadow:0 2px 10px rgba(0,0,0,0.5);}
-  .plyr--full-ui input[type="range"]::-webkit-slider-thumb { background:#7289da; }
-  #sb-mark-btn { position:fixed; bottom:20px; right:20px; z-index:9999; padding:10px; background:#1DB954; color:white; border:none; border-radius:8px; cursor:pointer;}
-</style>
-</head>
-<body>
+const BASE = "https://krynet-llc.github.io/KrySearch/UI/index.html";
+const CONFIG_URL = "https://krynet-llc.github.io/KrySearch/UI/Config/config.json";
 
-<h1>KrySearch - Search Engine</h1>
-<input type="file" id="fileInput" accept="video/*,audio/*" multiple />
-<div class="video-feed" id="videoFeed"></div>
+// -----------------------------
+// Helpers
+// -----------------------------
 
-<!-- Plyr & Microlink -->
-<script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@microlink/hover-vanilla@latest/dist/microlink.min.js"></script>
+function setOG(property, content) {
+    let tag = document.querySelector(`meta[property='${property}']`);
+    if (!tag) {
+        tag = document.createElement("meta");
+        tag.setAttribute("property", property);
+        document.head.appendChild(tag);
+    }
+    tag.setAttribute("content", content);
+}
 
-<script type="module">
-// ----------------- KrySearch Embed & ClearURLs -----------------
-(async function(){
-  const CLEAR_URLS_JSON_URL="https://raw.githubusercontent.com/ClearURLs/Rules/master/data.min.json";
-  let clearRules=[];
-  async function loadClearRules(){
-    try{
-      const res=await fetch(CLEAR_URLS_JSON_URL);
-      const data=await res.json();
-      clearRules=Object.values(data.providers).map(p=>({
-        urlPattern:new RegExp(p.urlPattern,"i"),
-        rules:p.rules?.map(r=>new RegExp(r,"i")),
-        rawRules:p.rawRules?.map(r=>new RegExp(r,"i")),
-        exceptions:p.exceptions?.map(r=>new RegExp(r,"i"))
-      }));
-    } catch(err){ console.warn("ClearURLs failed:",err);}
-  }
-  function cleanUrl(input){
-    let url; try{ url=new URL(input);}catch{return input;}
-    if(![...url.searchParams].length) return input;
-    clearRules.forEach(({urlPattern,exceptions,rules,rawRules})=>{
-      if(!urlPattern.test(url.href)) return;
-      if(exceptions?.some(e=>e.test(url.href))) return;
-      const toDelete=[]; if(rules) url.searchParams.forEach((_,p)=>{ if(rules.some(r=>r.test(p))) toDelete.push(p); });
-      toDelete.forEach(p=>url.searchParams.delete(p));
-      let cleaned=url.href; rawRules?.forEach(r=>cleaned=cleaned.replace(r,"")); url=new URL(cleaned);
-    });
-    return url.toString();
-  }
+function setCanonical(url) {
+    let link = document.querySelector("link[rel='canonical']");
+    if (!link) {
+        link = document.createElement("link");
+        link.rel = "canonical";
+        document.head.appendChild(link);
+    }
+    link.href = url;
+}
 
-  async function createEmbed(container,url){
-    if(!container) return;
-    url=cleanUrl(url);
-    const wrapper=document.createElement("div");
-    wrapper.className="video-wrapper"; wrapper.style.width="100%";
-    const content=document.createElement("div"); content.style.padding="8px 12px"; content.style.display="flex"; content.style.flexDirection="column"; wrapper.appendChild(content);
-    container.appendChild(wrapper);
+function embedURL(targetUrl) {
 
-    const ext=url.split(".").pop()?.toLowerCase();
-    const videoTypes=['mp4','webm','mov','mkv'], audioTypes=['mp3','wav','ogg','flac'], imageTypes=['jpg','jpeg','png','gif','webp'], docTypes=['pdf','txt','csv','doc','docx','xlsx','ppt','pptx'];
+    const container = document.createElement("div");
+    container.style.margin = "20px auto";
+    container.style.maxWidth = "900px";
 
-    if(url.match(/youtube\.com\/watch|youtu\.be/)){
-      const vidId=url.split("v=")[1]?.split("&")[0]||url.split("/").pop();
-      const iframe=document.createElement("iframe"); iframe.src=`https://www.youtube.com/embed/${vidId}`;
-      iframe.width="100%"; iframe.height="270px"; iframe.allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"; iframe.allowFullscreen=true;
-      content.appendChild(iframe); wrapper.classList.add("youtube-embed");
-    } else if(videoTypes.includes(ext)){ const v=document.createElement("video"); v.src=url; v.controls=true; v.style.width="100%"; content.appendChild(v); new Plyr(v,{controls:['play','progress','current-time','mute','volume','fullscreen'],ratio:'16:9',hideControls:true}); }
-    else if(audioTypes.includes(ext)){ const a=document.createElement("audio"); a.src=url; a.controls=true; a.style.width="100%"; content.appendChild(a); new Plyr(a,{controls:['play','progress','current-time','mute','volume'],hideControls:true}); }
-    else if(imageTypes.includes(ext)){ const i=document.createElement("img"); i.src=url; i.style.width="100%"; content.appendChild(i);}
-    else if(docTypes.includes(ext)){ const f=document.createElement("div"); f.textContent=`File: ${url.split("/").pop()} (${ext})`; f.style.padding="10px"; f.style.background="#3a3b3c"; f.style.borderRadius="6px"; f.style.textAlign="center"; f.style.fontWeight="bold"; content.appendChild(f);}
-  }
+    const ext = targetUrl.split(".").pop()?.toLowerCase();
 
-  await loadClearRules();
+    const videoExt = ["mp4","webm","mov","mkv"];
+    const audioExt = ["mp3","wav","ogg","flac"];
+    const imageExt = ["jpg","jpeg","png","gif","webp","bmp"];
 
-  // Example: Auto detect links in body (could be replaced by your search result links)
-  function scanLinks(){document.querySelectorAll("a").forEach(a=>{if(!a.dataset.kryEmbed){createEmbed(videoFeed,a.href); a.dataset.kryEmbed="true";});}
-  const observer=new MutationObserver(scanLinks); observer.observe(document.body,{childList:true,subtree:true}); scanLinks();
+    if (videoExt.includes(ext)) {
+        const video = document.createElement("video");
+        video.src = targetUrl;
+        video.controls = true;
+        video.style.width = "100%";
+        container.appendChild(video);
+
+    } else if (audioExt.includes(ext)) {
+        const audio = document.createElement("audio");
+        audio.src = targetUrl;
+        audio.controls = true;
+        audio.style.width = "100%";
+        container.appendChild(audio);
+
+    } else if (imageExt.includes(ext)) {
+        const img = document.createElement("img");
+        img.src = targetUrl;
+        img.style.width = "100%";
+        container.appendChild(img);
+
+    } else if (targetUrl.includes("youtube.com") || targetUrl.includes("youtu.be")) {
+
+        let videoId = null;
+
+        if (targetUrl.includes("v=")) {
+            videoId = new URL(targetUrl).searchParams.get("v");
+        } else {
+            videoId = targetUrl.split("/").pop();
+        }
+
+        const iframe = document.createElement("iframe");
+        iframe.src = `https://www.youtube.com/embed/${videoId}`;
+        iframe.width = "100%";
+        iframe.height = "500";
+        iframe.allowFullscreen = true;
+        iframe.style.border = "none";
+
+        container.appendChild(iframe);
+
+    } else {
+        const iframe = document.createElement("iframe");
+        iframe.src = targetUrl;
+        iframe.style.width = "100%";
+        iframe.style.height = "700px";
+        iframe.style.border = "none";
+        container.appendChild(iframe);
+    }
+
+    document.body.appendChild(container);
+}
+
+// -----------------------------
+// Parse URL
+// -----------------------------
+
+const params = new URLSearchParams(window.location.search);
+const query = params.get("q");
+const directUrl = params.get("url");
+const engineParam = params.get("engine");
+
+// -----------------------------
+// Load config.json
+// -----------------------------
+
+let config;
+try {
+    const res = await fetch(CONFIG_URL);
+    config = await res.json();
+} catch (err) {
+    console.error("Config load failed:", err);
+    return;
+}
+
+const engines = {
+    ...config.engines.open_source,
+    ...config.engines.closed_source
+};
+
+const defaultEngine = config.search.defaultEngine;
+
+const activeEngineName =
+    engineParam && engines[engineParam]
+        ? engineParam
+        : defaultEngine;
+
+const activeEngine = engines[activeEngineName];
+
+// -----------------------------
+// Main Logic
+// -----------------------------
+
+if (directUrl) {
+
+    const canonical = `${BASE}?url=${encodeURIComponent(directUrl)}&engine=${activeEngineName}`;
+
+    document.title = `KrySearch - Media (${activeEngineName})`;
+
+    setCanonical(canonical);
+
+    setOG("og:title", `KrySearch - Media Preview`);
+    setOG("og:description", directUrl);
+    setOG("og:url", canonical);
+
+    // Media OG detection
+    if (directUrl.endsWith(".mp4")) {
+        setOG("og:type", "video.other");
+        setOG("og:video", directUrl);
+        setOG("og:video:type", "video/mp4");
+    } else if (directUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+        setOG("og:type", "image");
+        setOG("og:image", directUrl);
+    } else {
+        setOG("og:type", "website");
+    }
+
+    embedURL(directUrl);
+
+}
+else if (query) {
+
+    const canonical = `${BASE}?q=${encodeURIComponent(query)}&engine=${activeEngineName}`;
+
+    const searchURL = activeEngine.url.replace(
+        "{query}",
+        encodeURIComponent(query)
+    );
+
+    document.title = `KrySearch - ${query} (${activeEngineName})`;
+
+    setCanonical(canonical);
+
+    setOG("og:title", `KrySearch - ${query}`);
+    setOG("og:description", `Search results for "${query}" using ${activeEngineName}`);
+    setOG("og:url", canonical);
+    setOG("og:type", "website");
+
+    embedURL(searchURL);
+
+}
+else {
+
+    document.title = "KrySearch - Search Engine";
+    setOG("og:title", "KrySearch - Search Engine");
+    setOG("og:description", "Search and embed media with KrySearch.");
+    setOG("og:type", "website");
+
+    document.body.innerHTML += "<p style='text-align:center;margin-top:50px;'>No query or URL provided.</p>";
+
+}
+
 })();
 </script>
-
-<script>
-// ----------------- File Upload Player -----------------
-const fileInput=document.getElementById("fileInput");
-const videoFeed=document.getElementById("videoFeed");
-fileInput.addEventListener("change",e=>Array.from(e.target.files).forEach(file=>{
-  const wrapper=document.createElement("div"); wrapper.className="video-wrapper";
-  const el=document.createElement(file.type.startsWith("video/")?"video":"audio");
-  el.src=URL.createObjectURL(file); el.controls=true; el.playsInline=true; el.muted=file.type.startsWith("video/"); el.autoplay=false;
-  wrapper.appendChild(el); videoFeed.appendChild(wrapper);
-  new Plyr(el,{controls:file.type.startsWith("video/")?['play','progress','current-time','mute','volume','fullscreen']:['play','progress','current-time','mute','volume'],hideControls:true});
-}));
-</script>
-
-<script>
-// ----------------- Dearrow (YouTube Thumbnail/Title Replacement) -----------------
-(function(){const embedUrlRe=/youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/; const cache=new Map();
-async function getDearrowData(id){if(cache.has(id))return cache.get(id); try{const r=await fetch(`https://sponsor.ajay.app/api/branding?videoID=${id}`); if(!r.ok)return null; const d=await r.json(); cache.set(id,d); return d;}catch{return null;}}
-async function processEmbed(embed){if(embed.dataset.dearrowProcessed)return; const iframe=embed.querySelector("iframe"); if(!iframe)return; const match=embedUrlRe.exec(iframe.src); if(!match)return; const id=match[1]; const data=await getDearrowData(id); if(!data)return; embed.dataset.dearrowProcessed="true";}
-function scan(){document.querySelectorAll(".youtube-embed").forEach(processEmbed);} new MutationObserver(scan).observe(document.body,{childList:true,subtree:true}); scan();})();
-</script>
-
-<script>
-// ----------------- YouTube/Piped/Invidious Ad Removal -----------------
-(function(){ const host=location.hostname; const isYT=host.includes("youtube.com")||host.includes("youtube-nocookie.com"); const isInv=host.includes("invidio.us")||host.includes("invidious"); const isP=host.includes("piped.video")||host.includes("piped"); if(!isYT&&!isInv&&!isP)return;
-if(isYT){ const o=(obj,prop,val)=>{if(!obj||typeof obj!=="object")return;for(const k in obj){if(k===prop)obj[k]=val; else if(typeof obj[k]==="object")o(obj[k],prop,val);}}; const nativeParse=JSON.parse; JSON.parse=function(...a){const r=nativeParse.apply(this,a); o(r,"adPlacements",[]); o(r,"playerAds",[]); return r;}; Response.prototype.json=new Proxy(Response.prototype.json,{async apply(t,th,a){const r=await Reflect.apply(t,th,a); o(r,"adPlacements",[]); o(r,"playerAds",[]); return r;}}); const s=document.createElement("style"); s.textContent=".ytp-ad-overlay-container,.ytp-ad-module,.ytd-display-ad-renderer,.ytd-promoted-video-renderer{display:none !important;}"; document.head.appendChild(s); const autoSkip=()=>{if(document.querySelector(".ad-showing")){const v=document.querySelector("video"); if(v&&v.duration){v.currentTime=v.duration; document.querySelector(".ytp-ad-skip-button")?.click();}}}; new MutationObserver(autoSkip).observe(document.documentElement,{childList:true,subtree:true}); }
-if(isInv||isP){ const url=new URL(location.href); let modified=false; url.searchParams.forEach((_,k)=>{if(k.startsWith("utm_")||k==="si"){url.searchParams.delete(k); modified=true;}}); if(modified)history.replaceState(null,"",url.toString()); const s=document.createElement("style"); s.textContent=".sponsor,.promoted,.ad,[class*='promo']{display:none !important;}"; document.head.appendChild(s); }
-})();
-</script>
-
-<script>
-// ----------------- Spotify-style SponsorBlock -----------------
-(function(){ const segmentCache=new Map(); const API_BASE="https://sponsor.ajay.app/api"; let markingStart=null; async function getSegments(id){if(segmentCache.has(id))return segmentCache.get(id); try{ const r=await fetch(`${API_BASE}/skipSegments?videoID=${id}&service=Spotify`); if(!r.ok)return[]; const d=await r.json(); segmentCache.set(id,d); return d;}catch{return [];} } async function submitSegment(id,start,end){try{await fetch(`${API_BASE}/submitSegment`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({videoID:id,segment:[start,end],category:"sponsor",service:"Spotify"})}); alert("Segment submitted successfully.");}catch{alert("Submission failed.");}} function extractEpisodeId(){ const m=window.location.pathname.match(/episode\/([a-zA-Z0-9]+)/); return m?m[1]:null;} async function attachSponsorBlock(audio){ if(audio.dataset.sbAttached)return; const id=extractEpisodeId(); if(!id)return; const segments=await getSegments(id); if(segments.length){audio.addEventListener("timeupdate",()=>{ const t=audio.currentTime; for(const s of segments){const [start,end]=s.segment; if(t>=start&&t<end){audio.currentTime=end; break;}}});} audio.dataset.sbAttached="true";} function addUI(audio){if(document.getElementById("sb-mark-btn"))return; const btn=document.createElement("button"); btn.id="sb-mark-btn"; btn.textContent="Mark Sponsor"; btn.onclick=async()=>{const id=extractEpisodeId(); if(!id)return; if(markingStart===null){markingStart=audio.currentTime; btn.textContent="Mark End";} else{ const end=audio.currentTime; const start=markingStart; markingStart=null; btn.textContent="Mark Sponsor"; if(end>start) await submitSegment(id,start,end);}}; document.body.appendChild(btn);} function scan(){const audio=document.querySelector("audio"); if(!audio)return; attachSponsorBlock(audio); addUI(audio);} new MutationObserver(scan).observe(document.body,{childList:true,subtree:true}); scan();})();
-</script>
-
-</body>
-</html>
