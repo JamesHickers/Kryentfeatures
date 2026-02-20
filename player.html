@@ -73,7 +73,7 @@ button, select {
 </head>
 <body>
 
-<div class="kry-container" id="playerContainer">
+<div class="kry-container">
     <div id="mediaContainer"></div>
 
     <div class="kry-controls" id="controls">
@@ -117,7 +117,7 @@ let video = null;
 let ytPlayer = null;
 let isYouTube = false;
 
-/* -------- Detect Source -------- */
+/* ---------------- SOURCE DETECTION ---------------- */
 
 if (!url) {
     mediaContainer.innerHTML = "<p style='padding:20px'>No video URL provided</p>";
@@ -125,20 +125,18 @@ if (!url) {
 }
 else if (url.includes("youtube.com") || url.includes("youtu.be")) {
     isYouTube = true;
-    initYouTube(url);
+    // WAIT for YouTube API callback instead of calling directly
 }
 else {
     initHTML5(url);
 }
 
-/* -------- HTML5 PLAYER -------- */
+/* ---------------- HTML5 PLAYER ---------------- */
 
 function initHTML5(src) {
 
     video = document.createElement("video");
     video.src = src;
-    video.style.width = "100%";
-    video.style.height = "100%";
     video.playsInline = true;
 
     mediaContainer.appendChild(video);
@@ -165,30 +163,24 @@ function initHTML5(src) {
             await video.requestPictureInPicture();
     };
 
-    const savedSpeed = localStorage.getItem("krySpeed");
-    if (savedSpeed) {
-        video.playbackRate = savedSpeed;
-        speedSelect.value = savedSpeed;
-    }
-
     speedSelect.onchange = () => {
         video.playbackRate = speedSelect.value;
-        localStorage.setItem("krySpeed", speedSelect.value);
     };
 }
 
-/* -------- YOUTUBE PLAYER -------- */
+/* ---------------- YOUTUBE INIT (CORRECT WAY) ---------------- */
 
-function initYouTube(originalUrl) {
+function onYouTubeIframeAPIReady() {
 
-    pipBtn.classList.add("hidden"); // PiP not supported
+    if (!isYouTube) return;
 
-    const idMatch = originalUrl.match(/(v=|embed\/|youtu\.be\/)([^&]+)/);
+    const idMatch = url.match(/(v=|embed\/|youtu\.be\/)([^&]+)/);
     const videoId = idMatch ? idMatch[2] : null;
-
     if (!videoId) return;
 
-    ytPlayer = new YT.Player(mediaContainer, {
+    pipBtn.classList.add("hidden");
+
+    ytPlayer = new YT.Player("mediaContainer", {
         videoId: videoId,
         playerVars: {
             controls: 0,
@@ -196,7 +188,7 @@ function initYouTube(originalUrl) {
             rel: 0
         },
         events: {
-            onReady: () => updateYTProgress(),
+            onReady: () => startYTProgressLoop(),
             onStateChange: e => {
                 if (e.data === YT.PlayerState.PLAYING)
                     playBtn.textContent = "Pause";
@@ -225,13 +217,12 @@ function initYouTube(originalUrl) {
     };
 }
 
-function updateYTProgress() {
+function startYTProgressLoop() {
     setInterval(() => {
         if (!ytPlayer || !ytPlayer.getDuration) return;
 
         const duration = ytPlayer.getDuration();
         const current = ytPlayer.getCurrentTime();
-
         if (!duration) return;
 
         progressBar.style.width = (current / duration) * 100 + "%";
@@ -239,7 +230,7 @@ function updateYTProgress() {
     }, 500);
 }
 
-/* -------- SHARED -------- */
+/* ---------------- SHARED ---------------- */
 
 function updateProgress() {
     if (!video.duration) return;
@@ -256,7 +247,7 @@ function formatTime(sec){
     return m + ":" + (s<10?"0":"") + s;
 }
 
-/* -------- KEYBOARD SHORTCUTS -------- */
+/* ---------------- KEYBOARD ---------------- */
 
 document.addEventListener("keydown", e => {
 
@@ -279,12 +270,6 @@ document.addEventListener("keydown", e => {
                 ytPlayer.seekTo(ytPlayer.getCurrentTime() + 10, true);
             else
                 video.currentTime += 10;
-            break;
-        case "f":
-            if (!document.fullscreenElement)
-                document.documentElement.requestFullscreen();
-            else
-                document.exitFullscreen();
             break;
     }
 });
