@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>KrySearch Director Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Your director script -->
+  <script src="./krysearch.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 40px;
+      background: #111;
+      color: white;
+    }
+    input {
+      padding: 8px;
+      margin: 5px 0;
+      width: 300px;
+    }
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    .box {
+      margin-top: 20px;
+      padding: 15px;
+      background: #1e1e1e;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>KrySearch Director Test</h1>
+
+  <div>
+    <div>
+      <label>Query (q):</label><br>
+      <input id="q" placeholder="search or https://example.com">
+    </div>
+
+    <div>
+      <label>Direct URL (url):</label><br>
+      <input id="url" placeholder="https://example.com">
+    </div>
+
+    <div>
+      <label>Engine (optional):</label><br>
+      <input id="engine" placeholder="default">
+    </div>
+
+    <button onclick="runTest()">Run Test</button>
+  </div>
+
+  <div class="box">
+    <strong>Current URL:</strong>
+    <div id="current"></div>
+  </div>
+
+  <script>
+    function runTest() {
+      const q = document.getElementById("q").value;
+      const url = document.getElementById("url").value;
+      const engine = document.getElementById("engine").value;
+
+      const params = new URLSearchParams();
+
+      if (q) params.set("q", q);
+      if (url) params.set("url", url);
+      if (engine) params.set("engine", engine);
+
+      window.location.search = params.toString();
+    }
+
+    document.getElementById("current").textContent = window.location.href;
+  </script>
+
+</body>
+</html>
