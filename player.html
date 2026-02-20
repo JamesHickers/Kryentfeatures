@@ -1,18 +1,28 @@
-<!-- KrySearch Ultimate Embed Player -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>KrySearch Player</title>
+
 <style>
-.kry-container {
-    position: relative;
-    max-width: 100%;
+body {
+    margin: 0;
     background: #0f0f0f;
-    color: #fff;
     font-family: system-ui, sans-serif;
-    user-select: none;
+    color: white;
 }
 
-.kry-video {
+.kry-container {
+    position: relative;
     width: 100%;
-    display: block;
+    height: 100vh;
     background: black;
+}
+
+video, iframe {
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
 .kry-controls {
@@ -20,20 +30,18 @@
     bottom: 0;
     left: 0;
     right: 0;
-    background: linear-gradient(to top, rgba(0,0,0,.85), transparent);
     padding: 10px;
+    background: linear-gradient(to top, rgba(0,0,0,.9), transparent);
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    opacity: 1;
-    transition: opacity .25s ease;
+    gap: 8px;
 }
 
 .kry-progress {
     height: 6px;
     background: #333;
-    border-radius: 3px;
     cursor: pointer;
+    border-radius: 3px;
     position: relative;
 }
 
@@ -44,235 +52,243 @@
     border-radius: 3px;
 }
 
-.kry-buffer {
-    position: absolute;
-    height: 100%;
-    background: rgba(255,255,255,.2);
-    width: 0%;
-}
-
 .kry-buttons {
     display: flex;
     gap: 10px;
     align-items: center;
 }
 
-.kry-buttons button {
-    background: none;
-    border: none;
-    color: white;
-    cursor: pointer;
-    font-size: 14px;
-}
-
-.kry-buttons select {
+button, select {
     background: #222;
-    color: white;
     border: 1px solid #444;
+    color: white;
+    padding: 4px 8px;
+    cursor: pointer;
 }
 
-.kry-time-preview {
-    position: absolute;
-    bottom: 30px;
-    background: rgba(0,0,0,.8);
-    padding: 3px 6px;
-    font-size: 12px;
-    border-radius: 4px;
-    transform: translateX(-50%);
-    display: none;
-}
-
-.kry-buffering {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%,-50%);
-    font-size: 14px;
-    display: none;
-}
-
-.cinema-mode {
-    background: black;
-    padding: 40px 0;
+.hidden {
+    display: none !important;
 }
 </style>
+</head>
+<body>
 
-<div class="kry-container" id="kryPlayer">
-    <video class="kry-video" id="kryVideo" src="YOUR_VIDEO_URL_HERE"></video>
+<div class="kry-container" id="playerContainer">
+    <div id="mediaContainer"></div>
 
-    <div class="kry-buffering" id="kryBuffering">Buffering...</div>
-
-    <div class="kry-controls">
-        <div class="kry-progress" id="kryProgress">
-            <div class="kry-buffer" id="kryBuffer"></div>
-            <div class="kry-progress-bar" id="kryProgressBar"></div>
-            <div class="kry-time-preview" id="kryPreview"></div>
+    <div class="kry-controls" id="controls">
+        <div class="kry-progress" id="progress">
+            <div class="kry-progress-bar" id="progressBar"></div>
         </div>
 
         <div class="kry-buttons">
             <button id="playBtn">Play</button>
-            <button id="audioBtn">Audio Only</button>
             <button id="pipBtn">PiP</button>
-            <button id="cinemaBtn">Cinema</button>
+
             <select id="speedSelect">
                 <option value="0.5">0.5x</option>
                 <option value="1">1x</option>
                 <option value="1.5">1.5x</option>
                 <option value="2">2x</option>
             </select>
+
             <span id="timeDisplay">0:00 / 0:00</span>
         </div>
     </div>
 </div>
 
-<script>
-(function(){
+<script src="https://www.youtube.com/iframe_api"></script>
 
-const video = document.getElementById("kryVideo");
-const container = document.getElementById("kryPlayer");
+<script>
+const params = new URLSearchParams(window.location.search);
+const url = params.get("url");
+
+const mediaContainer = document.getElementById("mediaContainer");
+const controls = document.getElementById("controls");
 
 const playBtn = document.getElementById("playBtn");
-const audioBtn = document.getElementById("audioBtn");
 const pipBtn = document.getElementById("pipBtn");
-const cinemaBtn = document.getElementById("cinemaBtn");
+const progress = document.getElementById("progress");
+const progressBar = document.getElementById("progressBar");
 const speedSelect = document.getElementById("speedSelect");
-
-const progress = document.getElementById("kryProgress");
-const progressBar = document.getElementById("kryProgressBar");
-const bufferBar = document.getElementById("kryBuffer");
-const preview = document.getElementById("kryPreview");
-
-const bufferingIndicator = document.getElementById("kryBuffering");
 const timeDisplay = document.getElementById("timeDisplay");
 
-/* PLAY / PAUSE */
-playBtn.onclick = () => {
-    if (video.paused) video.play();
-    else video.pause();
-};
+let video = null;
+let ytPlayer = null;
+let isYouTube = false;
 
-video.onplay = () => playBtn.textContent = "Pause";
-video.onpause = () => playBtn.textContent = "Play";
+/* -------- Detect Source -------- */
 
-/* TIME UPDATE */
-video.ontimeupdate = () => {
-    const percent = (video.currentTime / video.duration) * 100;
-    progressBar.style.width = percent + "%";
-    updateTime();
-};
-
-/* BUFFER */
-video.onprogress = () => {
-    if (video.buffered.length) {
-        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-        const percent = (bufferedEnd / video.duration) * 100;
-        bufferBar.style.width = percent + "%";
-    }
-};
-
-video.onwaiting = () => bufferingIndicator.style.display = "block";
-video.onplaying = () => bufferingIndicator.style.display = "none";
-
-/* SEEK */
-progress.onclick = (e) => {
-    const rect = progress.getBoundingClientRect();
-    const percent = (e.clientX - rect.left) / rect.width;
-    video.currentTime = percent * video.duration;
-};
-
-/* HOVER PREVIEW */
-progress.onmousemove = (e) => {
-    const rect = progress.getBoundingClientRect();
-    const percent = (e.clientX - rect.left) / rect.width;
-    const time = percent * video.duration;
-
-    preview.style.left = e.clientX - rect.left + "px";
-    preview.textContent = formatTime(time);
-    preview.style.display = "block";
-};
-
-progress.onmouseleave = () => preview.style.display = "none";
-
-/* SPEED MEMORY */
-const savedSpeed = localStorage.getItem("krySpeed");
-if (savedSpeed) {
-    video.playbackRate = savedSpeed;
-    speedSelect.value = savedSpeed;
+if (!url) {
+    mediaContainer.innerHTML = "<p style='padding:20px'>No video URL provided</p>";
+    controls.classList.add("hidden");
+}
+else if (url.includes("youtube.com") || url.includes("youtu.be")) {
+    isYouTube = true;
+    initYouTube(url);
+}
+else {
+    initHTML5(url);
 }
 
-speedSelect.onchange = () => {
-    video.playbackRate = speedSelect.value;
-    localStorage.setItem("krySpeed", speedSelect.value);
-};
+/* -------- HTML5 PLAYER -------- */
 
-/* AUDIO ONLY */
-let audioOnly = false;
-audioBtn.onclick = () => {
-    audioOnly = !audioOnly;
-    video.style.display = audioOnly ? "none" : "block";
-    audioBtn.textContent = audioOnly ? "Video Mode" : "Audio Only";
-};
+function initHTML5(src) {
 
-/* PiP */
-pipBtn.onclick = async () => {
-    if (document.pictureInPictureElement)
-        await document.exitPictureInPicture();
-    else
-        await video.requestPictureInPicture();
-};
+    video = document.createElement("video");
+    video.src = src;
+    video.style.width = "100%";
+    video.style.height = "100%";
+    video.playsInline = true;
 
-/* CINEMA */
-cinemaBtn.onclick = () => container.classList.toggle("cinema-mode");
+    mediaContainer.appendChild(video);
 
-/* MEDIA SESSION */
-if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('play', () => video.play());
-    navigator.mediaSession.setActionHandler('pause', () => video.pause());
-    navigator.mediaSession.setActionHandler('seekbackward', () => video.currentTime -= 10);
-    navigator.mediaSession.setActionHandler('seekforward', () => video.currentTime += 10);
+    playBtn.onclick = () => {
+        video.paused ? video.play() : video.pause();
+    };
+
+    video.onplay = () => playBtn.textContent = "Pause";
+    video.onpause = () => playBtn.textContent = "Play";
+
+    video.ontimeupdate = updateProgress;
+
+    progress.onclick = e => {
+        const rect = progress.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        video.currentTime = percent * video.duration;
+    };
+
+    pipBtn.onclick = async () => {
+        if (document.pictureInPictureElement)
+            await document.exitPictureInPicture();
+        else
+            await video.requestPictureInPicture();
+    };
+
+    const savedSpeed = localStorage.getItem("krySpeed");
+    if (savedSpeed) {
+        video.playbackRate = savedSpeed;
+        speedSelect.value = savedSpeed;
+    }
+
+    speedSelect.onchange = () => {
+        video.playbackRate = speedSelect.value;
+        localStorage.setItem("krySpeed", speedSelect.value);
+    };
 }
 
-/* KEYBOARD */
-document.addEventListener("keydown", e => {
-    if (["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+/* -------- YOUTUBE PLAYER -------- */
 
-    switch(e.key.toLowerCase()){
-        case " ":
-        case "k":
-            e.preventDefault();
-            video.paused ? video.play() : video.pause();
-            break;
-        case "j": video.currentTime -= 10; break;
-        case "l": video.currentTime += 10; break;
-        case "f":
-            if (!document.fullscreenElement) container.requestFullscreen();
-            else document.exitFullscreen();
-            break;
-        case "m": video.muted = !video.muted; break;
-    }
-});
+function initYouTube(originalUrl) {
 
-/* MOBILE GESTURES */
-let touchStartX = 0;
-video.addEventListener("touchstart", e => touchStartX = e.changedTouches[0].screenX);
-video.addEventListener("touchend", e => {
-    const diff = e.changedTouches[0].screenX - touchStartX;
-    if (diff > 50) video.currentTime += 10;
-    if (diff < -50) video.currentTime -= 10;
-});
+    pipBtn.classList.add("hidden"); // PiP not supported
 
-/* TIME FORMAT */
+    const idMatch = originalUrl.match(/(v=|embed\/|youtu\.be\/)([^&]+)/);
+    const videoId = idMatch ? idMatch[2] : null;
+
+    if (!videoId) return;
+
+    ytPlayer = new YT.Player(mediaContainer, {
+        videoId: videoId,
+        playerVars: {
+            controls: 0,
+            modestbranding: 1,
+            rel: 0
+        },
+        events: {
+            onReady: () => updateYTProgress(),
+            onStateChange: e => {
+                if (e.data === YT.PlayerState.PLAYING)
+                    playBtn.textContent = "Pause";
+                else
+                    playBtn.textContent = "Play";
+            }
+        }
+    });
+
+    playBtn.onclick = () => {
+        const state = ytPlayer.getPlayerState();
+        if (state === YT.PlayerState.PLAYING)
+            ytPlayer.pauseVideo();
+        else
+            ytPlayer.playVideo();
+    };
+
+    speedSelect.onchange = () => {
+        ytPlayer.setPlaybackRate(Number(speedSelect.value));
+    };
+
+    progress.onclick = e => {
+        const rect = progress.getBoundingClientRect();
+        const percent = (e.clientX - rect.left) / rect.width;
+        ytPlayer.seekTo(percent * ytPlayer.getDuration(), true);
+    };
+}
+
+function updateYTProgress() {
+    setInterval(() => {
+        if (!ytPlayer || !ytPlayer.getDuration) return;
+
+        const duration = ytPlayer.getDuration();
+        const current = ytPlayer.getCurrentTime();
+
+        if (!duration) return;
+
+        progressBar.style.width = (current / duration) * 100 + "%";
+        timeDisplay.textContent = formatTime(current) + " / " + formatTime(duration);
+    }, 500);
+}
+
+/* -------- SHARED -------- */
+
+function updateProgress() {
+    if (!video.duration) return;
+
+    progressBar.style.width = (video.currentTime / video.duration) * 100 + "%";
+    timeDisplay.textContent =
+        formatTime(video.currentTime) + " / " +
+        formatTime(video.duration);
+}
+
 function formatTime(sec){
     const m = Math.floor(sec/60);
     const s = Math.floor(sec%60);
     return m + ":" + (s<10?"0":"") + s;
 }
 
-function updateTime(){
-    timeDisplay.textContent =
-        formatTime(video.currentTime) + " / " +
-        formatTime(video.duration || 0);
-}
+/* -------- KEYBOARD SHORTCUTS -------- */
 
-})();
+document.addEventListener("keydown", e => {
+
+    if (["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+
+    switch(e.key.toLowerCase()) {
+        case " ":
+        case "k":
+            e.preventDefault();
+            playBtn.click();
+            break;
+        case "j":
+            if (isYouTube)
+                ytPlayer.seekTo(ytPlayer.getCurrentTime() - 10, true);
+            else
+                video.currentTime -= 10;
+            break;
+        case "l":
+            if (isYouTube)
+                ytPlayer.seekTo(ytPlayer.getCurrentTime() + 10, true);
+            else
+                video.currentTime += 10;
+            break;
+        case "f":
+            if (!document.fullscreenElement)
+                document.documentElement.requestFullscreen();
+            else
+                document.exitFullscreen();
+            break;
+    }
+});
 </script>
+
+</body>
+</html>
