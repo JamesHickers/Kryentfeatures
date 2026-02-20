@@ -1,29 +1,18 @@
-<script type="module">
+// KrynetBlurNSFW.js
 window.KrynetBlurNSFW = {
+  settings: { blurAmount: 10, enabled: true },
 
-  settings: {
-    blurAmount: 10,
-    enabled: true
+  apply(messageEl, channel) {
+    if (this.settings.enabled && channel?.nsfw) messageEl.classList.add("kr-nsfw-blur");
   },
 
-  applyToMessage(messageElement, channel) {
-    if (!this.settings.enabled) return;
-    if (!channel?.nsfw) return;
-
-    messageElement.classList.add("kr-nsfw-blur");
-  },
-
-  setBlurAmount(px) {
+  setBlur(px) {
     this.settings.blurAmount = px;
-    document.documentElement.style.setProperty("--kr-nsfw-blur", `${px}px`);
+    document.documentElement.style.setProperty("--kr-nsfw-blur", px + "px");
   },
 
-  toggle(enabled) {
-    this.settings.enabled = enabled;
-  }
-
+  toggle(on) { this.settings.enabled = !!on; }
 };
 
-// Default CSS variable
+// Initialize default blur
 document.documentElement.style.setProperty("--kr-nsfw-blur", "10px");
-</script>
