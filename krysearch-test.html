@@ -7,7 +7,6 @@ const CONFIG_URL = "https://krynet-llc.github.io/KrySearch/UI/Config/config.json
 // -----------------------------
 // Helpers
 // -----------------------------
-
 function setOG(property, content) {
     let tag = document.querySelector(`meta[property='${property}']`);
     if (!tag) {
@@ -29,62 +28,73 @@ function setCanonical(url) {
 }
 
 function embedURL(targetUrl) {
-
     const container = document.createElement("div");
     container.style.margin = "20px auto";
     container.style.maxWidth = "900px";
+    container.style.width = "95%";
 
-    const ext = targetUrl.split(".").pop()?.toLowerCase();
+    // Avoid recursion: unwrap if already KrySearch URL
+    let mediaUrl = targetUrl;
+    if (targetUrl.startsWith(BASE)) {
+        const params = new URLSearchParams(targetUrl.split("?")[1]);
+        mediaUrl = params.get("url") || targetUrl;
+    }
 
+    const ext = mediaUrl.split(".").pop()?.toLowerCase();
     const videoExt = ["mp4","webm","mov","mkv"];
     const audioExt = ["mp3","wav","ogg","flac"];
     const imageExt = ["jpg","jpeg","png","gif","webp","bmp"];
 
     if (videoExt.includes(ext)) {
         const video = document.createElement("video");
-        video.src = targetUrl;
+        video.src = mediaUrl;
         video.controls = true;
+        video.autoplay = false; // prevent autoplay
+        video.muted = false;
+        video.loop = false;
         video.style.width = "100%";
+        video.style.maxHeight = "80vh";
+        video.style.objectFit = "contain";
         container.appendChild(video);
 
     } else if (audioExt.includes(ext)) {
         const audio = document.createElement("audio");
-        audio.src = targetUrl;
+        audio.src = mediaUrl;
         audio.controls = true;
         audio.style.width = "100%";
         container.appendChild(audio);
 
     } else if (imageExt.includes(ext)) {
         const img = document.createElement("img");
-        img.src = targetUrl;
+        img.src = mediaUrl;
         img.style.width = "100%";
+        img.style.maxHeight = "80vh";
+        img.style.objectFit = "contain";
         container.appendChild(img);
 
-    } else if (targetUrl.includes("youtube.com") || targetUrl.includes("youtu.be")) {
-
+    } else if (mediaUrl.includes("youtube.com") || mediaUrl.includes("youtu.be")) {
         let videoId = null;
-
-        if (targetUrl.includes("v=")) {
-            videoId = new URL(targetUrl).searchParams.get("v");
+        if (mediaUrl.includes("v=")) {
+            videoId = new URL(mediaUrl).searchParams.get("v");
         } else {
-            videoId = targetUrl.split("/").pop();
+            videoId = mediaUrl.split("/").pop();
         }
-
         const iframe = document.createElement("iframe");
         iframe.src = `https://www.youtube.com/embed/${videoId}`;
         iframe.width = "100%";
         iframe.height = "500";
         iframe.allowFullscreen = true;
         iframe.style.border = "none";
-
+        iframe.style.maxHeight = "80vh";
         container.appendChild(iframe);
 
     } else {
         const iframe = document.createElement("iframe");
-        iframe.src = targetUrl;
+        iframe.src = mediaUrl;
         iframe.style.width = "100%";
         iframe.style.height = "700px";
         iframe.style.border = "none";
+        iframe.style.maxHeight = "80vh";
         container.appendChild(iframe);
     }
 
@@ -94,7 +104,6 @@ function embedURL(targetUrl) {
 // -----------------------------
 // Parse URL
 // -----------------------------
-
 const params = new URLSearchParams(window.location.search);
 const query = params.get("q");
 const directUrl = params.get("url");
@@ -103,7 +112,6 @@ const engineParam = params.get("engine");
 // -----------------------------
 // Load config.json
 // -----------------------------
-
 let config;
 try {
     const res = await fetch(CONFIG_URL);
@@ -130,64 +138,80 @@ const activeEngine = engines[activeEngineName];
 // -----------------------------
 // Main Logic
 // -----------------------------
-
 if (directUrl) {
+    // Normalize if already KrySearch URL
+    let normalizedUrl = directUrl;
+    if (directUrl.startsWith(BASE)) {
+        const params = new URLSearchParams(directUrl.split("?")[1]);
+        normalizedUrl = params.get("url") || directUrl;
+    }
 
-    const canonical = `${BASE}?url=${encodeURIComponent(directUrl)}&engine=${activeEngineName}`;
+    const proxiedUrl = `${BASE}?url=${encodeURIComponent(normalizedUrl)}&engine=${activeEngineName}`;
+    const canonical = proxiedUrl;
 
     document.title = `KrySearch - Media (${activeEngineName})`;
-
     setCanonical(canonical);
-
     setOG("og:title", `KrySearch - Media Preview`);
-    setOG("og:description", directUrl);
+    setOG("og:description", normalizedUrl);
     setOG("og:url", canonical);
 
-    // Media OG detection
-    if (directUrl.endsWith(".mp4")) {
+    if (normalizedUrl.endsWith(".mp4")) {
         setOG("og:type", "video.other");
-        setOG("og:video", directUrl);
+        setOG("og:video", proxiedUrl);
         setOG("og:video:type", "video/mp4");
-    } else if (directUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+    } else if (normalizedUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
         setOG("og:type", "image");
-        setOG("og:image", directUrl);
+        setOG("og:image", proxiedUrl);
     } else {
         setOG("og:type", "website");
     }
 
-    embedURL(directUrl);
+    embedURL(proxiedUrl);
 
-}
-else if (query) {
+} else if (query) {
+    // Force full URLs to ?url=
+    if (/^https?:\/\//i.test(query)) {
+        const redirectUrl = `${BASE}?url=${encodeURIComponent(query)}&engine=${activeEngineName}`;
+        window.location.replace(redirectUrl);
+        return;
+    }
 
-    const canonical = `${BASE}?q=${encodeURIComponent(query)}&engine=${activeEngineName}`;
+    // If query is a KrySearch URL, unwrap
+    let searchQuery = query;
+    if (query.startsWith(BASE)) {
+        const params = new URLSearchParams(query.split("?")[1]);
+        const mediaUrl = params.get("url");
+        if (mediaUrl) searchQuery = mediaUrl;
+    }
 
-    const searchURL = activeEngine.url.replace(
-        "{query}",
-        encodeURIComponent(query)
-    );
+    const canonical = `${BASE}?q=${encodeURIComponent(searchQuery)}&engine=${activeEngineName}`;
+    const searchURL = activeEngine.url.replace("{query}", encodeURIComponent(searchQuery));
 
-    document.title = `KrySearch - ${query} (${activeEngineName})`;
-
+    document.title = `KrySearch - ${searchQuery} (${activeEngineName})`;
     setCanonical(canonical);
-
-    setOG("og:title", `KrySearch - ${query}`);
-    setOG("og:description", `Search results for "${query}" using ${activeEngineName}`);
+    setOG("og:title", `KrySearch - ${searchQuery}`);
+    setOG("og:description", `Search results for "${searchQuery}" using ${activeEngineName}`);
     setOG("og:url", canonical);
     setOG("og:type", "website");
 
-    embedURL(searchURL);
+    const mediaExt = searchQuery.split(".").pop()?.toLowerCase();
+    const videoExt = ["mp4","webm","mov","mkv"];
+    const audioExt = ["mp3","wav","ogg","flac"];
+    const imageExt = ["jpg","jpeg","png","gif","webp","bmp"];
+    if (videoExt.includes(mediaExt) || audioExt.includes(mediaExt) || imageExt.includes(mediaExt) ||
+        searchQuery.includes("youtube.com") || searchQuery.includes("youtu.be")) {
+        const proxiedUrl = `${BASE}?url=${encodeURIComponent(searchQuery)}&engine=${activeEngineName}`;
+        embedURL(proxiedUrl);
+    } else {
+        embedURL(searchURL);
+    }
 
-}
-else {
-
+} else {
     document.title = "KrySearch - Search Engine";
     setOG("og:title", "KrySearch - Search Engine");
     setOG("og:description", "Search and embed media with KrySearch.");
     setOG("og:type", "website");
-
     document.body.innerHTML += "<p style='text-align:center;margin-top:50px;'>No query or URL provided.</p>";
-
 }
 
 })();
