@@ -1,106 +1,61 @@
 (function () {
     const embedUrlRe = /youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/;
-    const cache = new Map();
+    const licenseKey = "FR3Lo-e986a"; // your Dearrow license
 
-    async function getDearrowData(videoId) {
-        if (cache.has(videoId)) return cache.get(videoId);
+    async function process(embed) {
+        if (embed.__dearrow) return;
 
-        try {
-            const res = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${videoId}`);
-            if (!res.ok) return null;
-
-            const data = await res.json();
-            cache.set(videoId, data);
-            return data;
-        } catch {
-            return null;
-        }
-    }
-
-    async function processEmbed(embedElement) {
-        if (embedElement.dataset.dearrowProcessed) return;
-
-        const iframe = embedElement.querySelector("iframe");
+        const iframe = embed.querySelector("iframe");
         if (!iframe) return;
 
         const match = embedUrlRe.exec(iframe.src);
         if (!match) return;
 
-        const videoId = match[1];
-        const data = await getDearrowData(videoId);
-        if (!data) return;
+        const id = match[1];
+        let data;
+        try {
+            const res = await fetch(`https://sponsor.ajay.app/api/branding?videoID=${id}&license=${licenseKey}`);
+            if (!res.ok) return;
+            data = await res.json();
+        } catch { return; }
 
-        const { titles, thumbnails } = data;
+        const titleEl = embed.querySelector(".embed-title");
+        const thumbEl = embed.querySelector(".embed-thumbnail");
+        if (!titleEl && !thumbEl) return;
 
-        const hasTitle = titles?.[0]?.votes >= 0;
-        const hasThumb = thumbnails?.[0]?.votes >= 0 && !thumbnails?.[0]?.original;
+        const orig = { title: titleEl?.textContent, thumb: thumbEl?.src };
+        const newTitle = data.titles?.[0]?.votes >= 0 ? data.titles[0].title.replace(/(^|\s)>(\S)/g,"$1$2") : null;
+        const newThumb = data.thumbnails?.[0]?.votes >= 0 && !data.thumbnails[0].original
+            ? `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${id}&time=${data.thumbnails[0].timestamp}&license=${licenseKey}`
+            : null;
 
-        if (!hasTitle && !hasThumb) return;
+        if (!newTitle && !newThumb) return;
 
-        const titleElement = embedElement.querySelector(".embed-title");
-        const thumbnailElement = embedElement.querySelector(".embed-thumbnail");
-
-        const original = {
-            title: titleElement?.textContent,
-            thumb: thumbnailElement?.src
+        const btn = document.createElement("button");
+        btn.className = "vc-dearrow-on";
+        btn.innerHTML = "...SVG HERE...";
+        btn.onclick = () => {
+            if (btn.className === "vc-dearrow-on") {
+                if (titleEl && newTitle) titleEl.textContent = orig.title;
+                if (thumbEl && newThumb) thumbEl.src = orig.thumb;
+                btn.className = "vc-dearrow-off";
+            } else {
+                if (titleEl && newTitle) titleEl.textContent = newTitle;
+                if (thumbEl && newThumb) thumbEl.src = newThumb;
+                btn.className = "vc-dearrow-on";
+            }
         };
 
-        const replacement = {
-            title: hasTitle
-                ? titles[0].title.replace(/(^|\s)>(\S)/g, "$1$2")
-                : null,
-            thumb: hasThumb
-                ? `https://dearrow-thumb.ajay.app/api/v1/getThumbnail?videoID=${videoId}&time=${thumbnails[0].timestamp}`
-                : null
-        };
+        embed.style.position = embed.style.position || "relative";
+        embed.appendChild(btn);
 
-        let enabled = true;
+        if (titleEl && newTitle) titleEl.textContent = newTitle;
+        if (thumbEl && newThumb) thumbEl.src = newThumb;
 
-        function apply() {
-            if (replacement.title && titleElement)
-                titleElement.textContent = replacement.title;
-
-            if (replacement.thumb && thumbnailElement)
-                thumbnailElement.src = replacement.thumb;
-
-            button.className = "vc-dearrow-toggle-on";
-            enabled = true;
-        }
-
-        function restore() {
-            if (original.title && titleElement)
-                titleElement.textContent = original.title;
-
-            if (original.thumb && thumbnailElement)
-                thumbnailElement.src = original.thumb;
-
-            button.className = "vc-dearrow-toggle-off";
-            enabled = false;
-        }
-
-        const button = document.createElement("button");
-        button.className = "vc-dearrow-toggle-on";
-        button.setAttribute("aria-label", "Toggle Dearrow");
-
-        button.innerHTML = `...SVG HERE...`; // paste your SVG
-
-        button.onclick = () => {
-            enabled ? restore() : apply();
-        };
-
-        embedElement.style.position = "relative";
-        embedElement.appendChild(button);
-
-        apply();
-        embedElement.dataset.dearrowProcessed = "true";
+        embed.__dearrow = true;
     }
 
-    function scan() {
-        document.querySelectorAll(".youtube-embed").forEach(processEmbed);
-    }
-
-    const observer = new MutationObserver(scan);
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    scan();
+    // Run once over all embeds
+    const embeds = document.querySelectorAll(".youtube-embed");
+    for (let i = 0; i < embeds.length; i++) process(embeds[i]);
 })();
