@@ -1,69 +1,54 @@
 <script type="module">
 window.KrynetCopyFile = {
+  MAX_COPY_SIZE: 500_000, // 500KB
 
-  MAX_COPY_SIZE: 500_000, // 500KB limit (adjust if needed)
-
-  isTextFile(file) {
-    return file.type?.startsWith("text/") ||
-           /\.(txt|md|json|js|ts|html|css|log)$/i.test(file.name);
+  isTextFile(f) {
+    return f.type?.startsWith("text/") || /\.(txt|md|json|js|ts|html|css|log)$/i.test(f.name);
   },
 
   createButton(file) {
     if (!this.isTextFile(file)) return null;
 
-    const button = document.createElement("div");
-    button.className = "kr-copy-btn";
-    button.setAttribute("role", "button");
-    button.title = file.size > this.MAX_COPY_SIZE
-      ? "File too large to copy"
-      : "Copy File Contents";
+    const btn = document.createElement("div");
+    btn.className = "kr-copy-btn";
+    btn.setAttribute("role","button");
 
-    let recentlyCopied = false;
+    let copied = false;
+    const update = () => {
+      btn.innerHTML = copied ? "✔" : (file.size > this.MAX_COPY_SIZE ? "🚫" : "📋");
+      btn.title = file.size > this.MAX_COPY_SIZE ? "File too large to copy" : "Copy File Contents";
+    };
+    update();
 
-    const updateIcon = () => {
-      if (recentlyCopied) {
-        button.innerHTML = "✔";
-      } else if (file.size > this.MAX_COPY_SIZE) {
-        button.innerHTML = "🚫";
-      } else {
-        button.innerHTML = "📋";
+    btn.onclick = async () => {
+      if (copied || file.size > this.MAX_COPY_SIZE) return;
+      try {
+        // Sciter + web compatible
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(file.content);
+        } else if (window.clipboardData) {
+          // IE/legacy fallback
+          window.clipboardData.setData("Text", file.content);
+        }
+        copied = true; update();
+        this.toast("Copied file contents!");
+        setTimeout(() => { copied = false; update(); }, 2000);
+      } catch {
+        this.toast("Failed to copy.");
       }
     };
 
-    updateIcon();
-
-    button.addEventListener("click", async () => {
-      if (recentlyCopied || file.size > this.MAX_COPY_SIZE) return;
-
-      try {
-        await navigator.clipboard.writeText(file.content);
-
-        recentlyCopied = true;
-        updateIcon();
-        this.toast("Copied file contents!");
-
-        setTimeout(() => {
-          recentlyCopied = false;
-          updateIcon();
-        }, 2000);
-
-      } catch (err) {
-        this.toast("Failed to copy.");
-      }
-    });
-
-    return button;
+    return btn;
   },
 
-  toast(message) {
-    const toast = document.createElement("div");
-    toast.className = "kr-toast";
-    toast.textContent = message;
-    document.body.appendChild(toast);
-
+  toast(msg) {
+    const t = document.createElement("div");
+    t.className = "kr-toast";
+    t.textContent = msg;
+    document.body.appendChild(t);
     setTimeout(() => {
-      toast.classList.add("fade");
-      setTimeout(() => toast.remove(), 300);
+      t.classList.add("fade");
+      setTimeout(() => t.remove(), 300);
     }, 2000);
   }
 };
