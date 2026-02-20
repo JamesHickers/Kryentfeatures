@@ -1,125 +1,65 @@
-(function () {
-    const segmentCache = new Map();
-    const API_BASE = "https://sponsor.ajay.app/api";
+(() => {
+    const cache = new Map(), API = "https://sponsor.ajay.app/api";
+    let markStart = null;
 
-    let markingStart = null;
+    const getId = () => (window.location.pathname.match(/episode\/([a-zA-Z0-9]+)/) || [])[1];
 
-    async function getSegments(episodeId) {
-        if (segmentCache.has(episodeId))
-            return segmentCache.get(episodeId);
-
+    const getSegs = async id => {
+        if (cache.has(id)) return cache.get(id);
         try {
-            const res = await fetch(
-                `${API_BASE}/skipSegments?videoID=${episodeId}&service=Spotify`
-            );
+            const res = await fetch(`${API}/skipSegments?videoID=${id}&service=Spotify`);
             if (!res.ok) return [];
-
             const data = await res.json();
-            segmentCache.set(episodeId, data);
+            cache.set(id, data);
             return data;
+        } catch { return []; }
+    };
 
-        } catch {
-            return [];
-        }
-    }
-
-    async function submitSegment(episodeId, start, end) {
+    const submitSeg = async (id, start, end) => {
         try {
-            await fetch(`${API_BASE}/submitSegment`, {
+            await fetch(`${API}/submitSegment`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    videoID: episodeId,
-                    segment: [start, end],
-                    category: "sponsor",
-                    service: "Spotify"
-                })
+                headers: { "Content-Type":"application/json" },
+                body: JSON.stringify({ videoID:id, segment:[start,end], category:"sponsor", service:"Spotify" })
             });
-
             alert("Segment submitted successfully.");
-        } catch (e) {
-            alert("Submission failed.");
-        }
-    }
+        } catch { alert("Submission failed."); }
+    };
 
-    function extractEpisodeId() {
-        const match = window.location.pathname.match(/episode\/([a-zA-Z0-9]+)/);
-        return match ? match[1] : null;
-    }
-
-    async function attachSponsorBlock(audio) {
-        if (audio.dataset.sbAttached) return;
-
-        const episodeId = extractEpisodeId();
-        if (!episodeId) return;
-
-        const segments = await getSegments(episodeId);
-        if (segments.length) {
+    const attachSB = async audio => {
+        if (audio.__sb) return;
+        const id = getId();
+        if (!id) return;
+        const segs = await getSegs(id);
+        if (segs.length) {
             audio.addEventListener("timeupdate", () => {
-                const current = audio.currentTime;
-
-                for (const segment of segments) {
-                    const [start, end] = segment.segment;
-
-                    if (current >= start && current < end) {
-                        audio.currentTime = end;
-                        break;
-                    }
+                const t = audio.currentTime;
+                for (const s of segs) {
+                    const [start,end] = s.segment;
+                    if (t >= start && t < end) { audio.currentTime = end; break; }
                 }
             });
         }
+        audio.__sb = true;
+    };
 
-        audio.dataset.sbAttached = "true";
-    }
-
-    function addUI(audio) {
+    const addUI = audio => {
         if (document.getElementById("sb-mark-btn")) return;
-
         const btn = document.createElement("button");
+        Object.assign(btn.style, { position:"fixed", bottom:"20px", right:"20px", zIndex:9999, padding:"10px", background:"#1DB954", color:"#fff", border:"none", borderRadius:"8px", cursor:"pointer" });
         btn.id = "sb-mark-btn";
         btn.textContent = "Mark Sponsor";
-        btn.style.position = "fixed";
-        btn.style.bottom = "20px";
-        btn.style.right = "20px";
-        btn.style.zIndex = "9999";
-        btn.style.padding = "10px";
-        btn.style.background = "#1DB954";
-        btn.style.color = "white";
-        btn.style.border = "none";
-        btn.style.borderRadius = "8px";
-        btn.style.cursor = "pointer";
-
         btn.onclick = async () => {
-            const episodeId = extractEpisodeId();
-            if (!episodeId) return;
-
-            if (markingStart === null) {
-                markingStart = audio.currentTime;
-                btn.textContent = "Mark End";
-            } else {
-                const end = audio.currentTime;
-                const start = markingStart;
-                markingStart = null;
-                btn.textContent = "Mark Sponsor";
-
-                if (end > start)
-                    await submitSegment(episodeId, start, end);
-            }
+            const id = getId();
+            if (!id) return;
+            if (markStart===null) { markStart = audio.currentTime; btn.textContent="Mark End"; }
+            else { const end = audio.currentTime; const start = markStart; markStart=null; btn.textContent="Mark Sponsor"; if (end>start) await submitSeg(id,start,end); }
         };
-
         document.body.appendChild(btn);
-    }
+    };
 
-    function scan() {
-        const audio = document.querySelector("audio");
-        if (!audio) return;
+    const scan = () => { const audio = document.querySelector("audio"); if (!audio) return; attachSB(audio); addUI(audio); };
 
-        attachSponsorBlock(audio);
-        addUI(audio);
-    }
-
-    const observer = new MutationObserver(scan);
-    observer.observe(document.body, { childList: true, subtree: true });
-
+    new MutationObserver(scan).observe(document.body,{childList:true,subtree:true});
     scan();
 })();
