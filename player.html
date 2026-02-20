@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>KrySearch Player</title>
+<title>KrySearch Media</title>
 
 <style>
 body {
@@ -10,269 +10,107 @@ body {
     background: #0f0f0f;
     font-family: system-ui, sans-serif;
     color: white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
 }
 
 .kry-container {
-    position: relative;
     width: 100%;
-    height: 100vh;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
     background: black;
 }
 
-video, iframe {
+video, iframe, img {
+    max-width: 100%;
+    max-height: 100%;
     width: 100%;
     height: 100%;
-    display: block;
-}
-
-.kry-controls {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 10px;
-    background: linear-gradient(to top, rgba(0,0,0,.9), transparent);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.kry-progress {
-    height: 6px;
-    background: #333;
-    cursor: pointer;
-    border-radius: 3px;
-    position: relative;
-}
-
-.kry-progress-bar {
-    height: 100%;
-    width: 0%;
-    background: #ff3d00;
-    border-radius: 3px;
-}
-
-.kry-buttons {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-}
-
-button, select {
-    background: #222;
-    border: 1px solid #444;
-    color: white;
-    padding: 4px 8px;
-    cursor: pointer;
-}
-
-.hidden {
-    display: none !important;
+    object-fit: contain;
+    background: black;
 }
 </style>
 </head>
 <body>
 
-<div class="kry-container">
-    <div id="mediaContainer"></div>
-
-    <div class="kry-controls" id="controls">
-        <div class="kry-progress" id="progress">
-            <div class="kry-progress-bar" id="progressBar"></div>
-        </div>
-
-        <div class="kry-buttons">
-            <button id="playBtn">Play</button>
-            <button id="pipBtn">PiP</button>
-
-            <select id="speedSelect">
-                <option value="0.5">0.5x</option>
-                <option value="1">1x</option>
-                <option value="1.5">1.5x</option>
-                <option value="2">2x</option>
-            </select>
-
-            <span id="timeDisplay">0:00 / 0:00</span>
-        </div>
-    </div>
+<div class="kry-container" id="mediaContainer">
 </div>
-
-<script src="https://www.youtube.com/iframe_api"></script>
 
 <script>
 const params = new URLSearchParams(window.location.search);
 const url = params.get("url");
 
-const mediaContainer = document.getElementById("mediaContainer");
-const controls = document.getElementById("controls");
-
-const playBtn = document.getElementById("playBtn");
-const pipBtn = document.getElementById("pipBtn");
-const progress = document.getElementById("progress");
-const progressBar = document.getElementById("progressBar");
-const speedSelect = document.getElementById("speedSelect");
-const timeDisplay = document.getElementById("timeDisplay");
-
-let video = null;
-let ytPlayer = null;
-let isYouTube = false;
-
-/* ---------------- SOURCE DETECTION ---------------- */
+const container = document.getElementById("mediaContainer");
 
 if (!url) {
-    mediaContainer.innerHTML = "<p style='padding:20px'>No video URL provided</p>";
-    controls.classList.add("hidden");
-}
+    container.innerHTML = "<p>No media URL provided</p>";
+} 
 else if (url.includes("youtube.com") || url.includes("youtu.be")) {
-    isYouTube = true;
-    // WAIT for YouTube API callback instead of calling directly
+    loadYouTube(url);
+}
+else if (/\.(mp4|webm|ogg)$/i.test(url)) {
+    loadVideo(url);
+}
+else if (/\.(gif)$/i.test(url)) {
+    loadGIF(url);
+}
+else if (/\.(png|jpg|jpeg|webp|avif)$/i.test(url)) {
+    loadImage(url);
 }
 else {
-    initHTML5(url);
+    container.innerHTML = "<p>Unsupported media type</p>";
 }
 
-/* ---------------- HTML5 PLAYER ---------------- */
+/* ---------- YOUTUBE ---------- */
 
-function initHTML5(src) {
+function loadYouTube(link) {
 
-    video = document.createElement("video");
-    video.src = src;
-    video.playsInline = true;
+    const match = link.match(/(v=|embed\/|youtu\.be\/)([^&]+)/);
+    const videoId = match ? match[2] : null;
 
-    mediaContainer.appendChild(video);
-
-    playBtn.onclick = () => {
-        video.paused ? video.play() : video.pause();
-    };
-
-    video.onplay = () => playBtn.textContent = "Pause";
-    video.onpause = () => playBtn.textContent = "Play";
-
-    video.ontimeupdate = updateProgress;
-
-    progress.onclick = e => {
-        const rect = progress.getBoundingClientRect();
-        const percent = (e.clientX - rect.left) / rect.width;
-        video.currentTime = percent * video.duration;
-    };
-
-    pipBtn.onclick = async () => {
-        if (document.pictureInPictureElement)
-            await document.exitPictureInPicture();
-        else
-            await video.requestPictureInPicture();
-    };
-
-    speedSelect.onchange = () => {
-        video.playbackRate = speedSelect.value;
-    };
-}
-
-/* ---------------- YOUTUBE INIT (CORRECT WAY) ---------------- */
-
-function onYouTubeIframeAPIReady() {
-
-    if (!isYouTube) return;
-
-    const idMatch = url.match(/(v=|embed\/|youtu\.be\/)([^&]+)/);
-    const videoId = idMatch ? idMatch[2] : null;
-    if (!videoId) return;
-
-    pipBtn.classList.add("hidden");
-
-    ytPlayer = new YT.Player("mediaContainer", {
-        videoId: videoId,
-        playerVars: {
-            controls: 0,
-            modestbranding: 1,
-            rel: 0
-        },
-        events: {
-            onReady: () => startYTProgressLoop(),
-            onStateChange: e => {
-                if (e.data === YT.PlayerState.PLAYING)
-                    playBtn.textContent = "Pause";
-                else
-                    playBtn.textContent = "Play";
-            }
-        }
-    });
-
-    playBtn.onclick = () => {
-        const state = ytPlayer.getPlayerState();
-        if (state === YT.PlayerState.PLAYING)
-            ytPlayer.pauseVideo();
-        else
-            ytPlayer.playVideo();
-    };
-
-    speedSelect.onchange = () => {
-        ytPlayer.setPlaybackRate(Number(speedSelect.value));
-    };
-
-    progress.onclick = e => {
-        const rect = progress.getBoundingClientRect();
-        const percent = (e.clientX - rect.left) / rect.width;
-        ytPlayer.seekTo(percent * ytPlayer.getDuration(), true);
-    };
-}
-
-function startYTProgressLoop() {
-    setInterval(() => {
-        if (!ytPlayer || !ytPlayer.getDuration) return;
-
-        const duration = ytPlayer.getDuration();
-        const current = ytPlayer.getCurrentTime();
-        if (!duration) return;
-
-        progressBar.style.width = (current / duration) * 100 + "%";
-        timeDisplay.textContent = formatTime(current) + " / " + formatTime(duration);
-    }, 500);
-}
-
-/* ---------------- SHARED ---------------- */
-
-function updateProgress() {
-    if (!video.duration) return;
-
-    progressBar.style.width = (video.currentTime / video.duration) * 100 + "%";
-    timeDisplay.textContent =
-        formatTime(video.currentTime) + " / " +
-        formatTime(video.duration);
-}
-
-function formatTime(sec){
-    const m = Math.floor(sec/60);
-    const s = Math.floor(sec%60);
-    return m + ":" + (s<10?"0":"") + s;
-}
-
-/* ---------------- KEYBOARD ---------------- */
-
-document.addEventListener("keydown", e => {
-
-    if (["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) return;
-
-    switch(e.key.toLowerCase()) {
-        case " ":
-        case "k":
-            e.preventDefault();
-            playBtn.click();
-            break;
-        case "j":
-            if (isYouTube)
-                ytPlayer.seekTo(ytPlayer.getCurrentTime() - 10, true);
-            else
-                video.currentTime -= 10;
-            break;
-        case "l":
-            if (isYouTube)
-                ytPlayer.seekTo(ytPlayer.getCurrentTime() + 10, true);
-            else
-                video.currentTime += 10;
-            break;
+    if (!videoId) {
+        container.innerHTML = "<p>Invalid YouTube URL</p>";
+        return;
     }
-});
+
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1`;
+    iframe.allowFullscreen = true;
+    iframe.frameBorder = "0";
+    iframe.allow = "accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture";
+
+    container.appendChild(iframe);
+}
+
+/* ---------- HTML5 VIDEO ---------- */
+
+function loadVideo(src) {
+    const video = document.createElement("video");
+    video.src = src;
+    video.controls = true;
+    video.playsInline = true;
+    container.appendChild(video);
+}
+
+/* ---------- GIF ---------- */
+
+function loadGIF(src) {
+    const img = document.createElement("img");
+    img.src = src;
+    container.appendChild(img);
+}
+
+/* ---------- IMAGE ---------- */
+
+function loadImage(src) {
+    const img = document.createElement("img");
+    img.src = src;
+    container.appendChild(img);
+}
 </script>
 
 </body>
