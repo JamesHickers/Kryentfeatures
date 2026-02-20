@@ -1,0 +1,278 @@
+<!-- KrySearch Ultimate Embed Player -->
+<style>
+.kry-container {
+    position: relative;
+    max-width: 100%;
+    background: #0f0f0f;
+    color: #fff;
+    font-family: system-ui, sans-serif;
+    user-select: none;
+}
+
+.kry-video {
+    width: 100%;
+    display: block;
+    background: black;
+}
+
+.kry-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,.85), transparent);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    opacity: 1;
+    transition: opacity .25s ease;
+}
+
+.kry-progress {
+    height: 6px;
+    background: #333;
+    border-radius: 3px;
+    cursor: pointer;
+    position: relative;
+}
+
+.kry-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #ff3d00;
+    border-radius: 3px;
+}
+
+.kry-buffer {
+    position: absolute;
+    height: 100%;
+    background: rgba(255,255,255,.2);
+    width: 0%;
+}
+
+.kry-buttons {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.kry-buttons button {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.kry-buttons select {
+    background: #222;
+    color: white;
+    border: 1px solid #444;
+}
+
+.kry-time-preview {
+    position: absolute;
+    bottom: 30px;
+    background: rgba(0,0,0,.8);
+    padding: 3px 6px;
+    font-size: 12px;
+    border-radius: 4px;
+    transform: translateX(-50%);
+    display: none;
+}
+
+.kry-buffering {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%,-50%);
+    font-size: 14px;
+    display: none;
+}
+
+.cinema-mode {
+    background: black;
+    padding: 40px 0;
+}
+</style>
+
+<div class="kry-container" id="kryPlayer">
+    <video class="kry-video" id="kryVideo" src="YOUR_VIDEO_URL_HERE"></video>
+
+    <div class="kry-buffering" id="kryBuffering">Buffering...</div>
+
+    <div class="kry-controls">
+        <div class="kry-progress" id="kryProgress">
+            <div class="kry-buffer" id="kryBuffer"></div>
+            <div class="kry-progress-bar" id="kryProgressBar"></div>
+            <div class="kry-time-preview" id="kryPreview"></div>
+        </div>
+
+        <div class="kry-buttons">
+            <button id="playBtn">Play</button>
+            <button id="audioBtn">Audio Only</button>
+            <button id="pipBtn">PiP</button>
+            <button id="cinemaBtn">Cinema</button>
+            <select id="speedSelect">
+                <option value="0.5">0.5x</option>
+                <option value="1">1x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+            </select>
+            <span id="timeDisplay">0:00 / 0:00</span>
+        </div>
+    </div>
+</div>
+
+<script>
+(function(){
+
+const video = document.getElementById("kryVideo");
+const container = document.getElementById("kryPlayer");
+
+const playBtn = document.getElementById("playBtn");
+const audioBtn = document.getElementById("audioBtn");
+const pipBtn = document.getElementById("pipBtn");
+const cinemaBtn = document.getElementById("cinemaBtn");
+const speedSelect = document.getElementById("speedSelect");
+
+const progress = document.getElementById("kryProgress");
+const progressBar = document.getElementById("kryProgressBar");
+const bufferBar = document.getElementById("kryBuffer");
+const preview = document.getElementById("kryPreview");
+
+const bufferingIndicator = document.getElementById("kryBuffering");
+const timeDisplay = document.getElementById("timeDisplay");
+
+/* PLAY / PAUSE */
+playBtn.onclick = () => {
+    if (video.paused) video.play();
+    else video.pause();
+};
+
+video.onplay = () => playBtn.textContent = "Pause";
+video.onpause = () => playBtn.textContent = "Play";
+
+/* TIME UPDATE */
+video.ontimeupdate = () => {
+    const percent = (video.currentTime / video.duration) * 100;
+    progressBar.style.width = percent + "%";
+    updateTime();
+};
+
+/* BUFFER */
+video.onprogress = () => {
+    if (video.buffered.length) {
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        const percent = (bufferedEnd / video.duration) * 100;
+        bufferBar.style.width = percent + "%";
+    }
+};
+
+video.onwaiting = () => bufferingIndicator.style.display = "block";
+video.onplaying = () => bufferingIndicator.style.display = "none";
+
+/* SEEK */
+progress.onclick = (e) => {
+    const rect = progress.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    video.currentTime = percent * video.duration;
+};
+
+/* HOVER PREVIEW */
+progress.onmousemove = (e) => {
+    const rect = progress.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    const time = percent * video.duration;
+
+    preview.style.left = e.clientX - rect.left + "px";
+    preview.textContent = formatTime(time);
+    preview.style.display = "block";
+};
+
+progress.onmouseleave = () => preview.style.display = "none";
+
+/* SPEED MEMORY */
+const savedSpeed = localStorage.getItem("krySpeed");
+if (savedSpeed) {
+    video.playbackRate = savedSpeed;
+    speedSelect.value = savedSpeed;
+}
+
+speedSelect.onchange = () => {
+    video.playbackRate = speedSelect.value;
+    localStorage.setItem("krySpeed", speedSelect.value);
+};
+
+/* AUDIO ONLY */
+let audioOnly = false;
+audioBtn.onclick = () => {
+    audioOnly = !audioOnly;
+    video.style.display = audioOnly ? "none" : "block";
+    audioBtn.textContent = audioOnly ? "Video Mode" : "Audio Only";
+};
+
+/* PiP */
+pipBtn.onclick = async () => {
+    if (document.pictureInPictureElement)
+        await document.exitPictureInPicture();
+    else
+        await video.requestPictureInPicture();
+};
+
+/* CINEMA */
+cinemaBtn.onclick = () => container.classList.toggle("cinema-mode");
+
+/* MEDIA SESSION */
+if ('mediaSession' in navigator) {
+    navigator.mediaSession.setActionHandler('play', () => video.play());
+    navigator.mediaSession.setActionHandler('pause', () => video.pause());
+    navigator.mediaSession.setActionHandler('seekbackward', () => video.currentTime -= 10);
+    navigator.mediaSession.setActionHandler('seekforward', () => video.currentTime += 10);
+}
+
+/* KEYBOARD */
+document.addEventListener("keydown", e => {
+    if (["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+
+    switch(e.key.toLowerCase()){
+        case " ":
+        case "k":
+            e.preventDefault();
+            video.paused ? video.play() : video.pause();
+            break;
+        case "j": video.currentTime -= 10; break;
+        case "l": video.currentTime += 10; break;
+        case "f":
+            if (!document.fullscreenElement) container.requestFullscreen();
+            else document.exitFullscreen();
+            break;
+        case "m": video.muted = !video.muted; break;
+    }
+});
+
+/* MOBILE GESTURES */
+let touchStartX = 0;
+video.addEventListener("touchstart", e => touchStartX = e.changedTouches[0].screenX);
+video.addEventListener("touchend", e => {
+    const diff = e.changedTouches[0].screenX - touchStartX;
+    if (diff > 50) video.currentTime += 10;
+    if (diff < -50) video.currentTime -= 10;
+});
+
+/* TIME FORMAT */
+function formatTime(sec){
+    const m = Math.floor(sec/60);
+    const s = Math.floor(sec%60);
+    return m + ":" + (s<10?"0":"") + s;
+}
+
+function updateTime(){
+    timeDisplay.textContent =
+        formatTime(video.currentTime) + " / " +
+        formatTime(video.duration || 0);
+}
+
+})();
+</script>
