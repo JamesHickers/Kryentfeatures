@@ -1,165 +1,147 @@
-// geckoOptimizedScreenshare.js
-export async function startGeckoOptimizedScreenShare(wsUrl, wtUrl, options = {}) {
+// adaptiveHardwareScreenshare.js
+// Hardware-accelerated, adaptive, WebRTC-free screenshare skeleton
+
+export async function startHardwareScreenshare(wsUrl, wtUrl, options = {}) {
+  const {
+    captureAudio = false,
+    minWidth = 320,
+    minHeight = 180,
+    minFPS = 5,
+    maxFPS = 60,
+  } = options;
+
+  let stream, videoTrack, video, canvas, ctx, audioProcessor, writer, transport;
+
   try {
-    const { captureAudio = false, maxFPS = 30, minFPS = 5 } = options;
-
-    // --- 1. Detect environment ---
-    const isWeb = typeof window !== 'undefined' && 'navigator' in window;
-    const userAgent = navigator.userAgent.toLowerCase();
-    const isGecko = userAgent.includes('gecko') && !userAgent.includes('chrome');
-
-    if (!isGecko) console.warn('Module optimized for Gecko (Firefox).');
-
-    // --- 2. WebSocket for signaling ---
-    const ws = new WebSocket(wsUrl);
-    ws.addEventListener('open', () => console.log('Signaling WS connected'));
-    ws.addEventListener('message', (msg) => console.log('WS msg:', msg.data));
-
-    // --- 3. Capture screen ---
-    const stream = await navigator.mediaDevices.getDisplayMedia({ 
-      video: true, 
-      audio: captureAudio && isWeb
-    });
-    const videoTrack = stream.getVideoTracks()[0];
+    // --- 1. Capture screen ---
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: captureAudio });
+    videoTrack = stream.getVideoTracks()[0];
     const settings = videoTrack.getSettings();
-
     let width = settings.width || 1280;
     let height = settings.height || 720;
-    let fps = Math.min(settings.frameRate || 15, maxFPS);
+    let fps = Math.min(settings.frameRate || 30, maxFPS);
 
-    // --- 4. Hidden video element ---
-    const video = document.createElement('video');
+    // --- 2. Video element (offscreen) ---
+    video = document.createElement('video');
     video.srcObject = stream;
-    video.play();
+    video.autoplay = true;
+    video.playsInline = true;
+    await video.play();
 
-    // --- 5. Canvas for delta-frame encoding ---
-    let canvas, ctx, prevCanvas, prevCtx;
-
-    // Use offscreen canvas if available (Gecko performance boost)
+    // --- 3. Canvas (Offscreen if available) ---
     if (typeof OffscreenCanvas !== 'undefined') {
       canvas = new OffscreenCanvas(width, height);
       ctx = canvas.getContext('2d');
-      prevCanvas = new OffscreenCanvas(width, height);
-      prevCtx = prevCanvas.getContext('2d');
     } else {
       canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       ctx = canvas.getContext('2d');
-      prevCanvas = document.createElement('canvas');
-      prevCanvas.width = width;
-      prevCanvas.height = height;
-      prevCtx = prevCanvas.getContext('2d');
     }
 
-    // --- 6. Transport: WebTransport (if Gecko supports) or fallback WebSocket ---
-    let transport, writer;
-    if (isWeb && 'WebTransport' in window) {
+    // --- 4. Transport setup (WebTransport / WebSocket fallback) ---
+    if ('WebTransport' in window) {
       transport = new WebTransport(wtUrl);
       await transport.ready;
       writer = transport.datagrams.writable.getWriter();
-      console.log('Using WebTransport for streaming');
+      console.log('Using WebTransport');
     } else {
-      transport = ws;
-      writer = { write: (buffer) => transport.send(buffer) };
-      console.log('Using WebSocket fallback for streaming');
+      transport = new WebSocket(wsUrl);
+      writer = { write: (data) => transport.send(data) };
+      console.log('Using WebSocket fallback');
     }
+
+    // --- 5. Detect platform & GPU / hardware upscaler ---
+    const isAndroid = /android/i.test(navigator.userAgent);
+    const isApple = /mac|iphone|ipad/i.test(navigator.userAgent);
+    const isNvidia = false; // placeholder: implement native check in native apps
+    const isAMD = false;
+    const isIntel = false;
+
+    const applyHardwareUpscaler = (frameCanvas) => {
+      // Placeholder: in native apps, hook DLSS/FSR/XeSS/MetalFX/ASR
+      // Browser fallback: simple WebGPU or shader-based upscaler
+      return frameCanvas; // return frameCanvas after upscaling
+    };
 
     let lastSendTime = performance.now();
 
-    // --- 7. Delta-frame + adaptive streaming ---
+    // --- 6. Frame loop (adaptive + hardware accelerated) ---
     const sendFrame = async () => {
-      if (transport.closed || (transport.readyState && transport.readyState !== WebSocket.OPEN)) return;
+      if ((transport.readyState && transport.readyState !== WebSocket.OPEN) || transport.closed) return;
 
       const now = performance.now();
       const deltaTime = now - lastSendTime;
 
-      // Adaptive downgrade for weak hardware
-      if (deltaTime > (1000 / fps) * 1.5) {
+      // Adaptive downscale if frames are late
+      if (deltaTime > 1000 / fps * 1.5) {
         fps = Math.max(minFPS, Math.floor(fps * 0.8));
-        width = Math.max(320, Math.floor(width * 0.8));
-        height = Math.max(180, Math.floor(height * 0.8));
+        width = Math.max(minWidth, Math.floor(width * 0.8));
+        height = Math.max(minHeight, Math.floor(height * 0.8));
         canvas.width = width;
         canvas.height = height;
-        prevCanvas.width = width;
-        prevCanvas.height = height;
-        console.log(`Downgraded: ${width}x${height} @ ${fps} FPS`);
+        console.log(`Downscaled to ${width}x${height} @ ${fps} FPS`);
       }
 
-      // Draw current frame
+      // Draw video frame
       ctx.drawImage(video, 0, 0, width, height);
 
-      // Compute delta between current and previous frame
-      const current = ctx.getImageData(0, 0, width, height);
-      const prev = prevCtx.getImageData(0, 0, width, height);
-      const deltaPixels = new Uint8ClampedArray(current.data.length);
-      let changed = false;
+      // Hardware upscaling
+      const upscaledCanvas = applyHardwareUpscaler(canvas);
 
-      for (let i = 0; i < current.data.length; i++) {
-        const diff = current.data[i] - prev.data[i];
-        deltaPixels[i] = diff;
-        if (!changed && diff !== 0) changed = true;
-      }
-
-      if (changed) {
-        prevCtx.putImageData(current, 0, 0);
-
-        // Encode delta as WebP (quality tuned for Gecko)
-        const deltaCanvas = canvas instanceof OffscreenCanvas ? canvas : document.createElement('canvas');
-        deltaCanvas.width = width;
-        deltaCanvas.height = height;
-        const deltaCtx = deltaCanvas.getContext('2d');
-        deltaCtx.putImageData(new ImageData(deltaPixels, width, height), 0, 0);
-
-        const blob = await new Promise(res => deltaCanvas.convertToBlob
-          ? deltaCanvas.convertToBlob({ type: 'image/webp', quality: 0.7 }).then(res)
-          : deltaCanvas.toBlob(res, 'image/webp', 0.7)
-        );
-        if (blob) {
-          const buffer = await blob.arrayBuffer();
-          await writer.write(buffer);
-        }
+      // Encode frame
+      const blob = await (upscaledCanvas.convertToBlob
+        ? upscaledCanvas.convertToBlob({ type: 'image/webp', quality: 0.7 })
+        : new Promise((res) => upscaledCanvas.toBlob(res, 'image/webp', 0.7))
+      );
+      if (blob) {
+        const buffer = await blob.arrayBuffer();
+        await writer.write(buffer); // send frame
       }
 
       lastSendTime = performance.now();
       setTimeout(sendFrame, Math.max(1000 / fps, 1000 / minFPS));
     };
-
     sendFrame();
 
-    // --- 8. Optional audio capture (Gecko WebAudio) ---
-    if (captureAudio && isWeb) {
+    // --- 7. Optional lightweight audio capture ---
+    if (captureAudio && stream.getAudioTracks().length) {
       const audioCtx = new AudioContext();
       const source = audioCtx.createMediaStreamSource(stream);
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      source.connect(processor);
-      processor.connect(audioCtx.destination);
+      audioProcessor = audioCtx.createScriptProcessor(2048, 1, 1);
+      source.connect(audioProcessor);
+      audioProcessor.connect(audioCtx.destination);
 
-      processor.onaudioprocess = (e) => {
+      audioProcessor.onaudioprocess = (e) => {
         const input = e.inputBuffer.getChannelData(0);
-        const buffer = new Int16Array(input.length);
-        for (let i = 0; i < input.length; i++) buffer[i] = input[i] * 0x7fff;
-        writer.write(buffer.buffer).catch(() => {});
+        const buf = new Int16Array(input.length);
+        for (let i = 0; i < input.length; i++) buf[i] = input[i] * 0x7fff;
+        writer.write(buf.buffer).catch(() => {});
       };
     }
 
-    // --- 9. Stop handling ---
-    videoTrack.addEventListener('ended', () => {
-      console.log('Screenshare stopped');
-      writer.close?.();
-      transport.close?.();
-      ws.close();
-    });
+    // --- 8. Stop / cleanup handler ---
+    const stopHandler = () => {
+      try {
+        writer.close?.();
+        transport.close?.();
+        videoTrack.stop?.();
+        if (audioProcessor) audioProcessor.disconnect();
+        if (video) video.srcObject = null;
+        canvas = ctx = video = audioProcessor = null; // clear references
+        console.log('Screenshare stopped, resources released');
+      } catch (err) {
+        console.error('Cleanup error:', err);
+      }
+    };
 
-    return { ws, transport, stream };
+    videoTrack.addEventListener('ended', stopHandler);
+
+    return { stream, transport, stop: stopHandler };
   } catch (err) {
-    console.error('Gecko-optimized screenshare failed:', err);
+    console.error('Hardware-accelerated screenshare failed:', err);
+    // Ensure cleanup on failure
+    if (videoTrack) videoTrack.stop?.();
+    canvas = ctx = video = audioProcessor = null;
   }
 }
-
-// Example usage:
-// startGeckoOptimizedScreenShare(
-//   'wss://your-signaling-server',
-//   'https://your-webtransport-server',
-//   { captureAudio: true, maxFPS: 30, minFPS: 5 }
-// );
