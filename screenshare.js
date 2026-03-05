@@ -1,113 +1,112 @@
-// adaptiveHardwareScreenshare.js
-// Hardware-accelerated, adaptive, WebRTC-free screenshare skeleton
-
-export async function startHardwareScreenshare(wsUrl, wtUrl, options = {}) {
+export async function startMonitorAdaptiveScreenshare(wsUrl, wtUrl, options = {}) {
   const {
-    captureAudio = false,
-    minWidth = 320,
-    minHeight = 180,
-    minFPS = 5,
-    maxFPS = 60,
+    captureAudio = true,
+    videoQuality = 0.9,
+    useSpatialAudio = false,
   } = options;
 
-  let stream, videoTrack, video, canvas, ctx, audioProcessor, writer, transport;
+  let stream, videoTrack, video, canvas, ctx, writer, transport, audioProcessor;
+  let width, height, maxFPS, minFPS, fps;
 
   try {
-    // --- 1. Capture screen ---
+    // --- 1. Detect monitor resolution and FPS ---
+    width = window.screen.width;
+    height = window.screen.height;
+
+    // Measure approximate monitor refresh rate
+    minFPS = 5; // safe fallback
+    maxFPS = 60; // fallback if measurement fails
+    const sampleFrames = 60;
+    let frameTimes = [];
+    let lastTime = performance.now();
+
+    await new Promise((res) => {
+      let count = 0;
+      function measure() {
+        const now = performance.now();
+        frameTimes.push(now - lastTime);
+        lastTime = now;
+        count++;
+        if (count < sampleFrames) requestAnimationFrame(measure);
+        else res();
+      }
+      requestAnimationFrame(measure);
+    });
+
+    const avgFrame = frameTimes.reduce((a,b)=>a+b,0)/frameTimes.length;
+    maxFPS = Math.round(1000 / avgFrame);
+    fps = maxFPS; // start at max
+
+    // --- 2. Capture screen ---
     stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: captureAudio });
     videoTrack = stream.getVideoTracks()[0];
-    const settings = videoTrack.getSettings();
-    let width = settings.width || 1280;
-    let height = settings.height || 720;
-    let fps = Math.min(settings.frameRate || 30, maxFPS);
 
-    // --- 2. Video element (offscreen) ---
+    // --- 3. Video element ---
     video = document.createElement('video');
     video.srcObject = stream;
     video.autoplay = true;
     video.playsInline = true;
     await video.play();
 
-    // --- 3. Canvas (Offscreen if available) ---
-    if (typeof OffscreenCanvas !== 'undefined') {
-      canvas = new OffscreenCanvas(width, height);
-      ctx = canvas.getContext('2d');
-    } else {
-      canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      ctx = canvas.getContext('2d');
-    }
+    // --- 4. Canvas ---
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    ctx = canvas.getContext('2d');
 
-    // --- 4. Transport setup (WebTransport / WebSocket fallback) ---
+    // --- 5. WebTransport / WebSocket ---
     if ('WebTransport' in window) {
       transport = new WebTransport(wtUrl);
       await transport.ready;
       writer = transport.datagrams.writable.getWriter();
-      console.log('Using WebTransport');
     } else {
       transport = new WebSocket(wsUrl);
       writer = { write: (data) => transport.send(data) };
-      console.log('Using WebSocket fallback');
     }
 
-    // --- 5. Detect platform & GPU / hardware upscaler ---
-    const isAndroid = /android/i.test(navigator.userAgent);
-    const isApple = /mac|iphone|ipad/i.test(navigator.userAgent);
-    const isNvidia = false; // placeholder: implement native check in native apps
-    const isAMD = false;
-    const isIntel = false;
+    // --- 6. Lightweight GPU upscale shader (WebGPU) ---
+    if (!navigator.gpu) throw new Error('WebGPU not supported');
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+    const context = canvas.getContext('webgpu');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format, alphaMode: 'premultiplied' });
 
-    const applyHardwareUpscaler = (frameCanvas) => {
-      // Placeholder: in native apps, hook DLSS/FSR/XeSS/MetalFX/ASR
-      // Browser fallback: simple WebGPU or shader-based upscaler
-      return frameCanvas; // return frameCanvas after upscaling
-    };
-
-    let lastSendTime = performance.now();
-
-    // --- 6. Frame loop (adaptive + hardware accelerated) ---
+    // --- 7. Adaptive frame loop ---
+    let lastSend = performance.now();
     const sendFrame = async () => {
       if ((transport.readyState && transport.readyState !== WebSocket.OPEN) || transport.closed) return;
-
       const now = performance.now();
-      const deltaTime = now - lastSendTime;
+      const delta = now - lastSend;
 
-      // Adaptive downscale if frames are late
-      if (deltaTime > 1000 / fps * 1.5) {
-        fps = Math.max(minFPS, Math.floor(fps * 0.8));
-        width = Math.max(minWidth, Math.floor(width * 0.8));
-        height = Math.max(minHeight, Math.floor(height * 0.8));
-        canvas.width = width;
-        canvas.height = height;
-        console.log(`Downscaled to ${width}x${height} @ ${fps} FPS`);
-      }
+      // Simple network-adaptive downscale
+      if (delta > 1000 / fps * 1.5) fps = Math.max(minFPS, Math.floor(fps * 0.85));
 
-      // Draw video frame
       ctx.drawImage(video, 0, 0, width, height);
 
-      // Hardware upscaling
-      const upscaledCanvas = applyHardwareUpscaler(canvas);
+      // Encode
+      const blob = await canvas.convertToBlob({ type: 'image/webp', quality: videoQuality });
+      const buffer = await blob.arrayBuffer();
+      await writer.write(buffer);
 
-      // Encode frame
-      const blob = await (upscaledCanvas.convertToBlob
-        ? upscaledCanvas.convertToBlob({ type: 'image/webp', quality: 0.7 })
-        : new Promise((res) => upscaledCanvas.toBlob(res, 'image/webp', 0.7))
-      );
-      if (blob) {
-        const buffer = await blob.arrayBuffer();
-        await writer.write(buffer); // send frame
-      }
-
-      lastSendTime = performance.now();
+      lastSend = performance.now();
       setTimeout(sendFrame, Math.max(1000 / fps, 1000 / minFPS));
     };
     sendFrame();
 
-    // --- 7. Optional lightweight audio capture ---
+    // --- 8. Audio ---
     if (captureAudio && stream.getAudioTracks().length) {
-      const audioCtx = new AudioContext();
+      const audioCtx = new AudioContext({ sampleRate: 48000 });
       const source = audioCtx.createMediaStreamSource(stream);
+
+      if (useSpatialAudio) {
+        const panner = audioCtx.createPanner();
+        panner.panningModel = 'HRTF';
+        source.connect(panner).connect(audioCtx.destination);
+      } else {
+        source.connect(audioCtx.destination);
+      }
+
       audioProcessor = audioCtx.createScriptProcessor(2048, 1, 1);
       source.connect(audioProcessor);
       audioProcessor.connect(audioCtx.destination);
@@ -120,27 +119,23 @@ export async function startHardwareScreenshare(wsUrl, wtUrl, options = {}) {
       };
     }
 
-    // --- 8. Stop / cleanup handler ---
-    const stopHandler = () => {
+    // --- 9. Stop / cleanup ---
+    const stop = () => {
       try {
         writer.close?.();
         transport.close?.();
         videoTrack.stop?.();
         if (audioProcessor) audioProcessor.disconnect();
-        if (video) video.srcObject = null;
-        canvas = ctx = video = audioProcessor = null; // clear references
-        console.log('Screenshare stopped, resources released');
-      } catch (err) {
-        console.error('Cleanup error:', err);
-      }
+        video.srcObject = null;
+        canvas = ctx = video = audioProcessor = null;
+      } catch (err) { console.error('Cleanup error:', err); }
+      console.log('Monitor-adaptive screenshare stopped');
     };
+    videoTrack.addEventListener('ended', stop);
+    return { stream, transport, stop };
 
-    videoTrack.addEventListener('ended', stopHandler);
-
-    return { stream, transport, stop: stopHandler };
   } catch (err) {
-    console.error('Hardware-accelerated screenshare failed:', err);
-    // Ensure cleanup on failure
+    console.error('Monitor-adaptive screenshare failed:', err);
     if (videoTrack) videoTrack.stop?.();
     canvas = ctx = video = audioProcessor = null;
   }
